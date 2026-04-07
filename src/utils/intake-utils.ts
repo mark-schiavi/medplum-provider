@@ -15,6 +15,8 @@ import type {
   CodeableConcept,
   Coding,
   Consent,
+  ContactPoint,
+  Extension,
   HumanName,
   Observation,
   Organization,
@@ -240,16 +242,16 @@ export async function upsertObservation(
 type ExtensionQuestionnaireItemType = 'valueCoding' | 'valueBoolean';
 
 /**
- * Add an extension to a patient
+ * Add an extension to a resource
  *
- * @param patient - A patient resource
+ * @param resource - A FHIR resource that supports extensions (e.g., Patient, EpisodeOfCare)
  * @param url - An URL that identifies the extension
  * @param answerType - The value[x] field where the answer should be stored
  * @param answer - The value to be stored in the extension
  * @param subExtensionKey - A key to identify a sub-extension
  */
-export function addExtension(
-  patient: Patient,
+export function addExtension<T extends { extension?: Extension[] }>(
+  resource: T,
   url: string,
   answerType: ExtensionQuestionnaireItemType,
   answer: QuestionnaireResponseItemAnswer | undefined,
@@ -267,7 +269,7 @@ export function addExtension(
     return;
   }
 
-  patient.extension ||= [];
+  resource.extension ||= [];
 
   if (subExtensionKey) {
     const subExtensions = [
@@ -279,12 +281,12 @@ export function addExtension(
     if (answerType === 'valueCoding' && (value as Coding).display) {
       subExtensions.push({ url: 'text', valueString: (value as Coding).display as string });
     }
-    patient.extension.push({
+    resource.extension.push({
       url,
       extension: subExtensions,
     });
   } else {
-    patient.extension.push({
+    resource.extension.push({
       url,
       [answerType]: value,
     });
@@ -767,9 +769,9 @@ export function getHumanName(
   if (answers[`${prefix}first-name`]?.valueString) {
     givenName.push(answers[`${prefix}first-name`].valueString as string);
   }
-  if (answers[`${prefix}middle-name`]?.valueString) {
-    givenName.push(answers[`${prefix}middle-name`].valueString as string);
-  }
+  // if (answers[`${prefix}middle-name`]?.valueString) {
+  //   givenName.push(answers[`${prefix}middle-name`].valueString as string);
+  // }
 
   if (givenName.length > 0) {
     patientName.given = givenName;
@@ -782,23 +784,45 @@ export function getHumanName(
   return Object.keys(patientName).length > 0 ? patientName : undefined;
 }
 
+export function getContactDetails(
+  answers: Record<string, QuestionnaireResponseItemAnswer>
+): ContactPoint[] | undefined {
+  const contactDetails: ContactPoint[] = [];
+
+  if (answers['phone']?.valueString) {
+    contactDetails.push({ system: 'phone', value: answers['phone'].valueString });
+  }
+
+  if (answers['email']?.valueString) {
+    contactDetails.push({ system: 'email', value: answers['email'].valueString });
+  }
+
+  return contactDetails.length > 0 ? contactDetails : undefined;
+}
+
 export function getPatientAddress(answers: Record<string, QuestionnaireResponseItemAnswer>): Address | undefined {
   const patientAddress: Address = {};
 
-  if (answers['street']?.valueString) {
-    patientAddress.line = [answers['street'].valueString];
+  if (answers['address-line1']?.valueString) {
+    patientAddress.line = [answers['address-line1'].valueString];
+  }
+
+  if (answers['address-line2']?.valueString) {
+    patientAddress.line = patientAddress.line
+      ? [...patientAddress.line, answers['address-line2'].valueString]
+      : [answers['address-line2'].valueString];
   }
 
   if (answers['city']?.valueString) {
     patientAddress.city = answers['city'].valueString;
   }
 
-  if (answers['state']?.valueCoding?.code) {
-    patientAddress.state = answers['state'].valueCoding.code;
+  if (answers['county']?.valueString) {
+    patientAddress.state = answers['county'].valueString;
   }
 
-  if (answers['zip']?.valueString) {
-    patientAddress.postalCode = answers['zip'].valueString;
+  if (answers['postcode']?.valueString) {
+    patientAddress.postalCode = answers['postcode'].valueString;
   }
 
   // To simplify the demo, we're assuming the address is always a home address

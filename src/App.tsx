@@ -3,18 +3,7 @@
 import { getReferenceString } from '@medplum/core';
 import { useDoseSpotNotifications } from '@medplum/dosespot-react';
 import { AppShell, Loading, Logo, useMedplum, useMedplumProfile } from '@medplum/react';
-import {
-  IconApps,
-  IconBook2,
-  IconCalendarEvent,
-  IconClipboardCheck,
-  IconMail,
-  IconPill,
-  IconPrinter,
-  IconSettingsAutomation,
-  IconUserPlus,
-  IconUsers,
-} from '@tabler/icons-react';
+import { IconCalendarEvent, IconClipboardCheck, IconMail, IconUserPlus, IconUsers } from '@tabler/icons-react';
 import type { JSX } from 'react';
 import { Suspense, useState } from 'react';
 import { Navigate, Route, Routes, useLocation, useSearchParams } from 'react-router';
@@ -32,6 +21,7 @@ import { DoseSpotFavoritesPage } from './pages/integrations/DoseSpotFavoritesPag
 import { DoseSpotNotificationsPage } from './pages/integrations/DoseSpotNotificationsPage';
 import { IntegrationsPage } from './pages/integrations/IntegrationsPage';
 import { MessagesPage } from './pages/messages/MessagesPage';
+import { CaseTab } from './pages/patient/CaseTab';
 import { CommunicationTab } from './pages/patient/CommunicationTab';
 import { DoseSpotTab } from './pages/patient/DoseSpotTab';
 import { EditTab } from './pages/patient/EditTab';
@@ -86,12 +76,6 @@ export function App(): JSX.Element | null {
           ? [
               {
                 links: [
-                  { icon: <IconBook2 />, label: 'Spaces', href: '/Spaces/Communication' },
-                  {
-                    icon: <IconUsers />,
-                    label: 'Patients',
-                    href: '/Patient?_count=20&_fields=name,email,gender&_sort=-_lastUpdated',
-                  },
                   { icon: <IconCalendarEvent />, label: 'Schedule', href: `/Calendar/Schedule` },
                   {
                     icon: <IconMail />,
@@ -114,42 +98,24 @@ export function App(): JSX.Element | null {
                       subscriptionCriteria: `Task?owner=${getReferenceString(profile)}&status=requested,ready,received,accepted,in-progress,draft`,
                     },
                   },
-                  { icon: <IconPrinter />, label: 'Faxes', href: '/Fax/Communication' },
                 ],
               },
               {
-                title: 'Quick Links',
+                title: 'MH Patients',
                 links: [
-                  ...(!setupDismissed
-                    ? [
-                        {
-                          icon: <IconSettingsAutomation />,
-                          label: 'Get Started',
-                          href: '/getstarted',
-                          onDismiss: handleDismissSetup,
-                        },
-                      ]
-                    : []),
-                  { icon: <IconUserPlus />, label: 'New Patient', href: '/onboarding' },
-                  { icon: <IconApps />, label: 'Integrations', href: '/integrations' },
-                  ...(hasDoseSpot
-                    ? [
-                        {
-                          icon: <IconPill />,
-                          label: 'DoseSpot',
-                          href: '/dosespot',
-                          alert: true,
-                          count: doseSpotCount ?? 0,
-                        },
-                      ]
-                    : []),
+                  {
+                    icon: <IconUsers />,
+                    label: 'Patients',
+                    href: '/Patient?_count=20&_fields=name,email,gender&_sort=-_lastUpdated',
+                  },
+                  { icon: <IconUserPlus />, label: 'Patient Intake', href: '/onboarding' },
                 ],
               },
             ]
           : undefined
       }
       resourceTypeSearchDisabled={true}
-      spotlightPatientsOnly={true}
+      spotlightPatientsOnly={false}
     >
       <Suspense fallback={<Loading />}>
         <Routes>
@@ -198,6 +164,7 @@ export function App(): JSX.Element | null {
                   <Route path="history" element={<ResourceHistoryPage />} />
                 </Route>
                 <Route path="" element={<TimelineTab />} />
+                <Route path="case" element={<CaseTab />} />
               </Route>
               <Route path="/Communication" element={<MessagesPage />}>
                 <Route index element={<MessagesPage />} />

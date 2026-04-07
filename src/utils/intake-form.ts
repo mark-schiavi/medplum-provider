@@ -1,31 +1,23 @@
 // SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
 // SPDX-License-Identifier: Apache-2.0
 import type { MedplumClient } from '@medplum/core';
-import { addProfileToResource, append, createReference, EMPTY, getQuestionnaireAnswers } from '@medplum/core';
-import type { Organization, Patient, Questionnaire, QuestionnaireResponse, Reference } from '@medplum/fhirtypes';
+import { addProfileToResource, createReference, getQuestionnaireAnswers } from '@medplum/core';
+import type { EpisodeOfCare, Patient, Questionnaire, QuestionnaireResponse } from '@medplum/fhirtypes';
 import {
-  addAllergy,
-  addCondition,
   addConsent,
   addCoverage,
   addExtension,
-  addFamilyMemberHistory,
-  addImmunization,
   addLanguage,
-  addMedication,
-  addPharmacy,
   consentCategoryMapping,
   consentPolicyRuleMapping,
   consentScopeMapping,
   convertDateToDateTime,
   extensionURLMapping,
+  getContactDetails,
   getGroupRepeatedAnswers,
   getHumanName,
   getPatientAddress,
-  observationCategoryMapping,
-  observationCodeMapping,
   PROFILE_URLS,
-  upsertObservation,
 } from './intake-utils';
 
 export async function onboardPatient(
@@ -52,54 +44,39 @@ export async function onboardPatient(
     patient.birthDate = answers['dob'].valueDate;
   }
 
+  const contactDetails = getContactDetails(answers);
+  if (contactDetails) {
+    patient.telecom = contactDetails;
+  }
+
   const patientAddress = getPatientAddress(answers);
   if (patientAddress) {
     patient.address = [patientAddress];
   }
 
-  if (answers['gender-identity']?.valueCoding?.code) {
-    patient.gender = answers['gender-identity'].valueCoding.code as Patient['gender'];
+  if (answers['gender']?.valueCoding?.code) {
+    patient.gender = answers['gender'].valueCoding.code as Patient['gender'];
   }
 
   if (answers['phone']?.valueString) {
     patient.telecom = [{ system: 'phone', value: answers['phone'].valueString }];
   }
 
-  if (answers['ssn']?.valueString) {
-    patient.identifier = [
-      {
-        type: {
-          coding: [
-            {
-              system: 'http://terminology.hl7.org/CodeSystem/v2-0203',
-              code: 'SS',
-            },
-          ],
-        },
-        system: 'http://hl7.org/fhir/sid/us-ssn',
-        value: answers['ssn'].valueString,
+  // if (answers['ssn']?.valueString) {
+  patient.identifier = [
+    {
+      type: {
+        coding: [
+          {
+            system: 'http://terminology.hl7.org/CodeSystem/v2-0203',
+            code: 'SS',
+          },
+        ],
       },
-    ];
-  }
-
-  const emergencyContacts = getGroupRepeatedAnswers(questionnaire, response, 'emergency-contact');
-  for (const contact of emergencyContacts ?? EMPTY) {
-    patient.contact = append(patient.contact, {
-      relationship: [
-        {
-          coding: [
-            {
-              system: 'http://terminology.hl7.org/CodeSystem/v2-0131',
-              code: 'EP',
-              display: 'Emergency contact person',
-            },
-          ],
-        },
-      ],
-      name: getHumanName(contact, 'emergency-contact-'),
-      telecom: [{ system: 'phone', value: contact['emergency-contact-phone']?.valueString }],
-    });
-  }
+      system: 'http://hl7.org/fhir/sid/us-ssn',
+      value: Math.random().toString(36).substring(2, 15),
+    },
+  ];
 
   addExtension(patient, extensionURLMapping.race, 'valueCoding', answers['race'], 'ombCategory');
   addExtension(patient, extensionURLMapping.ethnicity, 'valueCoding', answers['ethnicity'], 'ombCategory');
@@ -109,7 +86,6 @@ export async function onboardPatient(
   addLanguage(patient, answers['preferred-language']?.valueCoding, true);
 
   // Create the patient resource
-
   patient = await medplum.createResource(patient);
 
   // NOTE: Updating the questionnaire response does not trigger a loop because the bot subscription
@@ -117,113 +93,54 @@ export async function onboardPatient(
   response.subject = createReference(patient);
   await medplum.createResource(response);
 
-  // Handle observations
+  let episodeOfCare: EpisodeOfCare = {
+    resourceType: 'EpisodeOfCare',
+    status: 'planned',
+    patient: createReference(patient),
+  };
 
-  await upsertObservation(
-    medplum,
-    patient,
-    observationCodeMapping.sexualOrientation,
-    observationCategoryMapping.socialHistory,
-    'valueCodeableConcept',
-    answers['sexual-orientation']?.valueCoding,
-    PROFILE_URLS.ObservationSexualOrientation
-  );
-
-  await upsertObservation(
-    medplum,
-    patient,
-    observationCodeMapping.housingStatus,
-    observationCategoryMapping.sdoh,
-    'valueCodeableConcept',
-    answers['housing-status']?.valueCoding
-  );
-
-  await upsertObservation(
-    medplum,
-    patient,
-    observationCodeMapping.educationLevel,
-    observationCategoryMapping.sdoh,
-    'valueCodeableConcept',
-    answers['education-level']?.valueCoding
-  );
-
-  await upsertObservation(
-    medplum,
-    patient,
-    observationCodeMapping.smokingStatus,
-    observationCategoryMapping.socialHistory,
-    'valueCodeableConcept',
-    answers['smoking-status']?.valueCoding,
-    PROFILE_URLS.ObservationSmokingStatus
-  );
-
-  await upsertObservation(
-    medplum,
-    patient,
-    observationCodeMapping.pregnancyStatus,
-    observationCategoryMapping.socialHistory,
-    'valueCodeableConcept',
-    answers['pregnancy-status']?.valueCoding
-  );
-
-  const estimatedDeliveryDate = convertDateToDateTime(answers['estimated-delivery-date']?.valueDate);
-  await upsertObservation(
-    medplum,
-    patient,
-    observationCodeMapping.estimatedDeliveryDate,
-    observationCategoryMapping.socialHistory,
-    'valueDateTime',
-    estimatedDeliveryDate ? { valueDateTime: estimatedDeliveryDate } : undefined
-  );
-
-  // Handle allergies
-
-  const allergies = getGroupRepeatedAnswers(questionnaire, response, 'allergies');
-  for (const allergy of allergies) {
-    await addAllergy(medplum, patient, allergy);
+  if (answers['referral-date']?.valueDate) {
+    episodeOfCare.period = { start: answers['referral-date'].valueDate };
   }
 
-  // Handle medications
-
-  const medications = getGroupRepeatedAnswers(questionnaire, response, 'medications');
-  for (const medication of medications) {
-    await addMedication(medplum, patient, medication);
+  if (answers['status']?.valueCoding) {
+    episodeOfCare.status = answers['status'].valueCoding.code as EpisodeOfCare['status'];
   }
 
-  // Handle medical history
-
-  const medicalHistory = getGroupRepeatedAnswers(questionnaire, response, 'medical-history');
-  for (const history of medicalHistory) {
-    await addCondition(medplum, patient, history);
+  if (answers['service-type']?.valueCoding) {
+    episodeOfCare.type = [
+      {
+        coding: [answers['service-type'].valueCoding],
+      },
+    ];
   }
 
-  const familyMemberHistory = getGroupRepeatedAnswers(questionnaire, response, 'family-member-history');
-  for (const history of familyMemberHistory) {
-    await addFamilyMemberHistory(medplum, patient, history);
+  // Add MH case state extension and meta tag if provided
+  if (answers['mh-case-state']?.valueCoding) {
+    const caseStateCoding = answers['mh-case-state'].valueCoding;
+
+    // Add as extension for detailed data (using valueCoding to preserve display text)
+    episodeOfCare.extension = episodeOfCare.extension || [];
+    episodeOfCare.extension.push({
+      url: 'https://iprsgroup.com/fhir/StructureDefinition/mh-case-state',
+      valueCoding: caseStateCoding,
+    });
+
+    // Add as meta tag for searchability
+    episodeOfCare.meta = episodeOfCare.meta || {};
+    episodeOfCare.meta.tag = episodeOfCare.meta.tag || [];
+    episodeOfCare.meta.tag.push({
+      system: 'https://iprsgroup.com/case-state',
+      code: caseStateCoding.code,
+    });
   }
 
-  // Handle vaccination history (immunizations)
-
-  const vaccinationHistory = getGroupRepeatedAnswers(questionnaire, response, 'vaccination-history');
-  for (const vaccine of vaccinationHistory) {
-    await addImmunization(medplum, patient, vaccine);
-  }
-
-  // Handle coverage
+  episodeOfCare = await medplum.createResource(episodeOfCare);
 
   const insuranceProviders = getGroupRepeatedAnswers(questionnaire, response, 'coverage-information');
   for (const provider of insuranceProviders) {
     await addCoverage(medplum, patient, provider);
   }
-
-  // Handle preferred pharmacy
-
-  const preferredPharmacyReference = answers['preferred-pharmacy-reference']?.valueReference;
-  if (preferredPharmacyReference) {
-    await addPharmacy(medplum, patient, preferredPharmacyReference as Reference<Organization>);
-  }
-
-  // Handle consents
 
   await addConsent(
     medplum,
@@ -233,36 +150,6 @@ export async function onboardPatient(
     consentCategoryMapping.med,
     consentPolicyRuleMapping.cric,
     convertDateToDateTime(answers['consent-for-treatment-date']?.valueDate)
-  );
-
-  await addConsent(
-    medplum,
-    patient,
-    !!answers['agreement-to-pay-for-treatment-help']?.valueBoolean,
-    consentScopeMapping.treatment,
-    consentCategoryMapping.pay,
-    consentPolicyRuleMapping.hipaaSelfPay,
-    convertDateToDateTime(answers['agreement-to-pay-for-treatment-date']?.valueDate)
-  );
-
-  await addConsent(
-    medplum,
-    patient,
-    !!answers['notice-of-privacy-practices-signature']?.valueBoolean,
-    consentScopeMapping.patientPrivacy,
-    consentCategoryMapping.nopp,
-    consentPolicyRuleMapping.hipaaNpp,
-    convertDateToDateTime(answers['notice-of-privacy-practices-date']?.valueDate)
-  );
-
-  await addConsent(
-    medplum,
-    patient,
-    !!answers['acknowledgement-for-advance-directives-signature']?.valueBoolean,
-    consentScopeMapping.adr,
-    consentCategoryMapping.acd,
-    consentPolicyRuleMapping.adr,
-    convertDateToDateTime(answers['acknowledgement-for-advance-directives-date']?.valueDate)
   );
 
   return patient;

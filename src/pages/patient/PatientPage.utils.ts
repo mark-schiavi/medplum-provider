@@ -46,6 +46,7 @@ export function getPatientPageTabs(membership: ProjectMembership | undefined): P
 }
 
 export const PatientPageTabs: PatientPageTabInfo[] = [
+  { id: 'case', url: 'Case', label: 'Case' },
   { id: 'timeline', url: '', label: 'Timeline' },
   { id: 'edit', url: 'edit', label: 'Edit' },
   {
