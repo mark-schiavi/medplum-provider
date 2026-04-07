@@ -140,13 +140,6 @@ export function Case({ patient }: CaseProps): JSX.Element {
                     </Text>
                   </Group>
 
-                  <Group>
-                    <Text fw={500} w={WIDTH}>
-                      Status:
-                    </Text>
-                    <Text>{episode.status}</Text>
-                  </Group>
-
                   {episode.diagnosis && episode.diagnosis.length > 0 && (
                     <Group align="flex-start">
                       <Text fw={500} w={WIDTH}>
